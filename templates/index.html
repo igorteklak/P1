@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WhoGapsWho -- which one's faster, on paper</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<header class="site">
+  <div class="wrap">
+    <div class="logo">Who<span>Gaps</span>Who</div>
+    <div class="tagline">Which one's faster, on paper</div>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <div class="hero">
+    <h1>Enter two vehicles. Settle it with numbers.</h1>
+    <p>Fill in the specs for any two cars or motorbikes and see how they actually stack up -- horsepower, 0-60, top speed, weight and price, side by side.</p>
+  </div>
+
+  {% if errors %}
+  <div class="errors">
+    <div class="errors-title">Fix these before we can compare:</div>
+    <ul>
+      {% for e in errors %}<li>{{ e }}</li>{% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  <form class="builder" method="post" action="{{ url_for('compare') }}">
+    <div class="builder-grid">
+
+      {% for slot, slot_class in [("a", "slot-a"), ("b", "slot-b")] %}
+      <div class="slot {{ slot_class }}">
+        <div class="slot-title">Vehicle {{ "1" if slot == "a" else "2" }}</div>
+
+        <div class="type-toggle">
+          {% for t in vehicle_types %}
+          {% set current_type = values.get("type_" + slot, "car") %}
+          <label class="type-option {{ 'checked' if current_type == t else '' }}">
+            <input type="radio"
+                   name="type_{{ slot }}"
+                   value="{{ t }}"
+                   data-slot="{{ slot }}"
+                   class="type-radio"
+                   {{ "checked" if current_type == t else "" }}>
+            {{ t|capitalize }}
+          </label>
+          {% endfor %}
+        </div>
+
+        <div class="vehicle-search">
+          <label for="{{ slot }}_search">Search vehicle</label>
+          <input type="text" class="search-input" id="{{ slot }}_search" data-slot="{{ slot }}"
+                 placeholder="Search make or model..." autocomplete="off">
+          <div class="search-results" data-slot="{{ slot }}"></div>
+        </div>
+
+        <div class="field-grid">
+          {% for field in common_fields %}
+          <div class="field">
+            <label for="{{ slot }}_{{ field.key }}">
+              {{ field.label }}{% if field.unit %} <span class="unit">({{ field.unit }})</span>{% endif %}
+            </label>
+            <input
+              type="{{ field.input }}"
+              id="{{ slot }}_{{ field.key }}"
+              name="{{ slot }}_{{ field.key }}"
+              placeholder="{{ field.placeholder or '' }}"
+              value="{{ values.get(slot + '_' + field.key, '') }}"
+              {% if field.input == 'number' %}
+                {% if field.min is defined %}min="{{ field.min }}"{% endif %}
+                {% if field.max is defined %}max="{{ field.max }}"{% endif %}
+                {% if field.step is defined %}step="{{ field.step }}"{% endif %}
+              {% endif %}
+              {{ "required" if field.required else "" }}>
+          </div>
+          {% endfor %}
+        </div>
+
+        {% for t in vehicle_types %}
+        {% set current_type = values.get("type_" + slot, "car") %}
+        <div class="field-grid type-fields" data-slot="{{ slot }}" data-type="{{ t }}"
+             style="display: {{ 'grid' if current_type == t else 'none' }};">
+          {% for field in type_fields[t] %}
+          <div class="field">
+            <label for="{{ slot }}_{{ t }}_{{ field.key }}">{{ field.label }}</label>
+            {% if field.input == 'select' %}
+            <select id="{{ slot }}_{{ t }}_{{ field.key }}" name="{{ slot }}_{{ field.key }}"
+                    {{ "" if current_type == t else "disabled" }}>
+              <option value="">Select...</option>
+              {% for opt in field.options %}
+              <option value="{{ opt }}" {{ "selected" if values.get(slot + '_' + field.key, '') == opt else "" }}>{{ opt }}</option>
+              {% endfor %}
+            </select>
+            {% else %}
+            <input type="{{ field.input }}" id="{{ slot }}_{{ t }}_{{ field.key }}" name="{{ slot }}_{{ field.key }}"
+                   value="{{ values.get(slot + '_' + field.key, '') }}"
+                   {{ "" if current_type == t else "disabled" }}>
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
+        {% endfor %}
+
+      </div>
+      {% endfor %}
+
+    </div>
+
+    <button type="submit" class="compare-btn">Compare</button>
+    <p class="hint">All fields except price are required. Comparison logic runs entirely on the server.</p>
+  </form>
+
+  {% if result %}
+  <div id="results" class="show">
+    <div class="verdict">
+      <div class="eyebrow">On paper, the faster one is</div>
+      <h2><span class="winner-name">{{ result.winner_name }}</span></h2>
+      <p>
+        {{ result.winner_name }} hits {{ result.winner_top_speed }} mph top speed and 0-60 in
+        {{ result.winner_zero_to_sixty }}s, roughly a {{ result.diff_pct }}% edge in raw speed
+        over the {{ result.loser_name }}.
+      </p>
+    </div>
+
+    <div class="vehicle-headers">
+      <div class="vehicle-card a">
+        <div class="name">{{ vehicle_a.make }} {{ vehicle_a.model }}</div>
+        <div class="meta">{{ vehicle_a_subtitle }}</div>
+      </div>
+      <div class="vehicle-card b">
+        <div class="name">{{ vehicle_b.make }} {{ vehicle_b.model }}</div>
+        <div class="meta">{{ vehicle_b_subtitle }}</div>
+      </div>
+    </div>
+
+    <div class="stats">
+      {% for row in result.rows %}
+      <div class="stat-row">
+        <div class="stat-label">{{ row.label }}</div>
+        <div class="stat-values">
+          <div class="stat-value {{ 'winner' if row.a_wins else '' }}">
+            <span class="stat-num">{{ row.a_value }}</span>
+            <span class="bar-track"><span class="bar-fill a" style="width: {{ row.a_pct }}%;"></span></span>
+          </div>
+          <div class="stat-value {{ 'winner' if row.b_wins else '' }}">
+            <span class="bar-track"><span class="bar-fill b" style="width: {{ row.b_pct }}%;"></span></span>
+            <span class="stat-num">{{ row.b_value }}</span>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+</div>
+
+<footer>
+  WhoGapsWho MVP -- search a seed catalog of cars and motorbikes, or enter specs by hand.
+</footer>
+
+<script id="vehicle-database" type="application/json">{{ vehicle_database|tojson }}</script>
+<script>
+  // UI-only: toggle which type-specific field group is visible/enabled,
+  // and drive the vehicle search box. No comparison logic here -- that
+  // all happens server-side in app.py.
+  var VEHICLES = JSON.parse(document.getElementById("vehicle-database").textContent);
+
+  function currentType(slot) {
+    var checked = document.querySelector('input[name="type_' + slot + '"]:checked');
+    return checked ? checked.value : "car";
+  }
+
+  function closeResults(slot) {
+    var box = document.querySelector('.search-results[data-slot="' + slot + '"]');
+    box.classList.remove("open");
+    box.innerHTML = "";
+  }
+
+  function renderResults(slot, query) {
+    var box = document.querySelector('.search-results[data-slot="' + slot + '"]');
+    if (!query) { closeResults(slot); return; }
+
+    var type = currentType(slot);
+    var q = query.toLowerCase();
+    var matches = VEHICLES.filter(function (v) {
+      return v.type === type &&
+        (v.make + " " + v.model + " " + v.year).toLowerCase().indexOf(q) !== -1;
+    }).slice(0, 8);
+
+    box.innerHTML = "";
+    if (matches.length === 0) {
+      var empty = document.createElement("div");
+      empty.className = "search-empty";
+      empty.textContent = "No matches";
+      box.appendChild(empty);
+    } else {
+      matches.forEach(function (v) {
+        var item = document.createElement("div");
+        item.className = "search-result";
+        item.textContent = v.year + " " + v.make + " " + v.model;
+        item.addEventListener("mousedown", function (e) {
+          e.preventDefault();
+          applyVehicle(slot, v);
+        });
+        box.appendChild(item);
+      });
+    }
+    box.classList.add("open");
+  }
+
+  function applyVehicle(slot, v) {
+    var type = v.type;
+    Object.keys(v).forEach(function (key) {
+      if (key === "type") return;
+      var input = document.getElementById(slot + "_" + key) ||
+        document.getElementById(slot + "_" + type + "_" + key);
+      if (input) input.value = v[key];
+    });
+    document.getElementById(slot + "_search").value = v.year + " " + v.make + " " + v.model;
+    closeResults(slot);
+  }
+
+  document.querySelectorAll(".search-input").forEach(function (input) {
+    input.addEventListener("input", function () {
+      renderResults(input.dataset.slot, input.value.trim());
+    });
+    input.addEventListener("focus", function () {
+      if (input.value.trim()) renderResults(input.dataset.slot, input.value.trim());
+    });
+    input.addEventListener("blur", function () {
+      var slot = input.dataset.slot;
+      setTimeout(function () { closeResults(slot); }, 100);
+    });
+  });
+
+  document.querySelectorAll(".type-radio").forEach(function (radio) {
+    radio.addEventListener("change", function () {
+      var slot = radio.dataset.slot;
+      document.querySelectorAll('.type-fields[data-slot="' + slot + '"]').forEach(function (group) {
+        var active = group.dataset.type === radio.value;
+        group.style.display = active ? "grid" : "none";
+        group.querySelectorAll("input, select").forEach(function (el) {
+          el.disabled = !active;
+        });
+      });
+      document.querySelectorAll('input[name="type_' + slot + '"]').forEach(function (r) {
+        r.closest(".type-option").classList.toggle("checked", r.checked);
+      });
+      document.getElementById(slot + "_search").value = "";
+      closeResults(slot);
+    });
+  });
+</script>
+
+</body>
+</html>
