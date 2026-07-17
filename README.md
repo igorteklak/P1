@@ -6,21 +6,28 @@ is faster on paper.
 ## Structure
 
 - `app.py` -- everything that thinks: field definitions, form parsing,
-  validation, the speed-score calculation, and stat formatting. This is the
-  only file with logic in it.
+  validation, the speed-score calculation, stat formatting, and the vehicle
+  search API. This is the only file with logic in it.
 - `templates/index.html` -- layout only. It loops over field definitions
   passed in from `app.py` and renders whatever it's given; it has no
   knowledge of how a winner is picked.
 - `static/style.css` -- styling.
+- `db.py` -- Postgres connection pooling (lazy: importing this module doesn't
+  require the database to be reachable yet).
+- `schema.sql` -- the `vehicles` table + trigram index used for search.
+- `seed_data.py` / `scripts/seed_db.py` -- the starting vehicle catalog and
+  the script that loads it into Postgres.
 
-There's no vehicle database yet -- you type in both vehicles' specs by hand.
-Swapping in a real database later means adding a lookup step in `app.py`
-before `parse_vehicle()`; the form and comparison logic won't need to change.
+You can still type in both vehicles' specs by hand. The "search for your
+vehicle" box additionally autofills those same fields from a Postgres-backed
+catalog, which you're then free to edit before comparing.
 
 ## Run it
 
 ```bash
 pip install -r requirements.txt
+cp .env.example .env   # adjust DATABASE_URL if needed
+python scripts/seed_db.py   # creates the vehicles table and loads seed data
 python app.py
 ```
 

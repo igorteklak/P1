@@ -167,12 +167,11 @@
   WhoGapsWho MVP -- search a seed catalog of cars and motorbikes, or enter specs by hand.
 </footer>
 
-<script id="vehicle-database" type="application/json">{{ vehicle_database|tojson }}</script>
 <script>
   // UI-only: toggle which type-specific field group is visible/enabled,
-  // and drive the vehicle search box. No comparison logic here -- that
-  // all happens server-side in app.py.
-  var VEHICLES = JSON.parse(document.getElementById("vehicle-database").textContent);
+  // and drive the vehicle search box against /api/vehicles. No comparison
+  // logic here -- that all happens server-side in app.py.
+  var searchDebounce = {};
 
   function currentType(slot) {
     var checked = document.querySelector('input[name="type_' + slot + '"]:checked');
@@ -185,17 +184,8 @@
     box.innerHTML = "";
   }
 
-  function renderResults(slot, query) {
+  function renderResults(slot, matches) {
     var box = document.querySelector('.search-results[data-slot="' + slot + '"]');
-    if (!query) { closeResults(slot); return; }
-
-    var type = currentType(slot);
-    var q = query.toLowerCase();
-    var matches = VEHICLES.filter(function (v) {
-      return v.type === type &&
-        (v.make + " " + v.model + " " + v.year).toLowerCase().indexOf(q) !== -1;
-    }).slice(0, 8);
-
     box.innerHTML = "";
     if (matches.length === 0) {
       var empty = document.createElement("div");
@@ -217,10 +207,18 @@
     box.classList.add("open");
   }
 
+  function fetchResults(slot, query) {
+    var type = currentType(slot);
+    fetch("/api/vehicles?type=" + encodeURIComponent(type) + "&q=" + encodeURIComponent(query))
+      .then(function (resp) { return resp.json(); })
+      .then(function (matches) { renderResults(slot, matches); })
+      .catch(function () { renderResults(slot, []); });
+  }
+
   function applyVehicle(slot, v) {
     var type = v.type;
     Object.keys(v).forEach(function (key) {
-      if (key === "type") return;
+      if (key === "type" || v[key] === null) return;
       var input = document.getElementById(slot + "_" + key) ||
         document.getElementById(slot + "_" + type + "_" + key);
       if (input) input.value = v[key];
@@ -231,10 +229,14 @@
 
   document.querySelectorAll(".search-input").forEach(function (input) {
     input.addEventListener("input", function () {
-      renderResults(input.dataset.slot, input.value.trim());
+      var slot = input.dataset.slot;
+      var query = input.value.trim();
+      clearTimeout(searchDebounce[slot]);
+      if (!query) { closeResults(slot); return; }
+      searchDebounce[slot] = setTimeout(function () { fetchResults(slot, query); }, 200);
     });
     input.addEventListener("focus", function () {
-      if (input.value.trim()) renderResults(input.dataset.slot, input.value.trim());
+      if (input.value.trim()) fetchResults(input.dataset.slot, input.value.trim());
     });
     input.addEventListener("blur", function () {
       var slot = input.dataset.slot;
